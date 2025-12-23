@@ -14,6 +14,9 @@ if (!requireNamespace("e1071", quietly = TRUE)) {
 if (!requireNamespace("ggplot2", quietly = TRUE)) {
   install.packages("ggplot2", repos = "https://cloud.r-project.org", quiet = TRUE, lib = user_lib)
 }
+if (!requireNamespace("pROC", quietly = TRUE)) {
+  install.packages("pROC", repos = "https://cloud.r-project.org", quiet = TRUE, lib = user_lib)
+}
 
 library(ggplot2)
 dir.create("figures", showWarnings = FALSE)
@@ -22,7 +25,11 @@ font_family <- if (.Platform$OS.type == "windows") "Microsoft YaHei" else ""
 base_theme <- theme_minimal() + theme(text = element_text(family = font_family))
 
 # 读取数据
-city_data <- read.csv("City_Types.csv", stringsAsFactors = FALSE)
+script_dir <- tryCatch(dirname(normalizePath(sys.frame(1)$ofile)), error = function(e) "")
+if (script_dir == "" || is.na(script_dir)) {
+  script_dir <- getwd()
+}
+city_data <- read.csv(file.path(script_dir, "City_Types.csv"), stringsAsFactors = FALSE)
 city_data$Type <- factor(city_data$Type)
 
 # 空气指标特征
@@ -85,6 +92,12 @@ if (length(levels(train_data$Type)) == 2) {
     Prob = logit_prob
   )
 
+  roc_obj <- pROC::roc(response = test_data$Type,
+                       predictor = logit_prob,
+                       levels = c(neg_class, pos_class),
+                       direction = "<")
+  auc_val <- as.numeric(pROC::auc(roc_obj))
+
   # 预测概率密度分布
   p_prob <- ggplot(pred_df, aes(x = Prob, fill = Actual)) +
     geom_density(alpha = 0.4) +
@@ -112,6 +125,21 @@ if (length(levels(train_data$Type)) == 2) {
          y = "实际为正类的比例") +
     base_theme
   ggsave("figures/logit_calibration.png", p_cal, width = 6, height = 4, dpi = 300)
+
+  roc_df <- data.frame(
+    FPR = 1 - roc_obj$specificities,
+    TPR = roc_obj$sensitivities
+  )
+  p_roc <- ggplot(roc_df, aes(x = FPR, y = TPR)) +
+    geom_line(color = "#2E86C1", linewidth = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#666666") +
+    labs(title = "Logistic ROC Curve",
+         subtitle = sprintf("AUC = %.4f", auc_val),
+         x = "False Positive Rate",
+         y = "True Positive Rate") +
+    base_theme
+  ggsave("figures/logit_roc.png", p_roc, width = 6, height = 4, dpi = 300)
+  cat(sprintf("Logistic AUC: %.4f\n", auc_val))
 } else {
   warning("Type 为多分类，逻辑回归预测可视化已跳过。")
 }
